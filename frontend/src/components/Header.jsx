@@ -1,5 +1,5 @@
 import React from 'react';
-import { GitBranch, GitPullRequest, Folder, FolderOpen, Sparkles, Network, RefreshCw, Layers, BookOpen } from 'lucide-react';
+import { GitBranch, GitPullRequest, Folder, FolderOpen, Sparkles, Network, RefreshCw, Layers, BookOpen, Code2 } from 'lucide-react';
 
 export default function Header({
   repoPath,
@@ -17,14 +17,16 @@ export default function Header({
   progress,
   onOpenGraph,
   onOpenClaudePrompt,
-  onOpenWalkthrough
+  onOpenWalkthrough,
+  activeMainView = 'code',
+  setActiveMainView
 }) {
   return (
-    <header className="bg-slate-900 border-b border-slate-800 px-6 py-3.5 sticky top-0 z-30 shadow-md">
+    <header className="bg-slate-900 border-b border-slate-800 px-6 py-3 sticky top-0 z-30 shadow-md">
       <div className="flex flex-wrap items-center justify-between gap-4">
         {/* Logo & Título */}
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 shrink-0">
             <GitPullRequest className="w-5 h-5 text-white" />
           </div>
           <div>
@@ -39,7 +41,7 @@ export default function Header({
         </div>
 
         {/* Inputs de Repositório e Branches */}
-        <div className="flex flex-wrap items-center gap-2.5 bg-slate-950/70 border border-slate-800/90 rounded-xl p-1.5 shadow-inner">
+        <div className="flex flex-wrap items-center gap-2 bg-slate-950/70 border border-slate-800/90 rounded-xl p-1.5 shadow-inner">
           {/* Botão Selecionar no Finder */}
           <button
             type="button"
@@ -66,7 +68,7 @@ export default function Header({
                 }
               }}
               placeholder="/caminho/do/repositorio"
-              className="bg-transparent text-xs text-slate-200 placeholder-slate-500 outline-none w-60 md:w-72 font-mono"
+              className="bg-transparent text-xs text-slate-200 placeholder-slate-500 outline-none w-56 md:w-64 font-mono"
               title="Digite ou cole o caminho do repositório Git e pressione Enter ou clique em Carregar"
             />
             {repoPath && (
@@ -135,41 +137,47 @@ export default function Header({
           <button
             onClick={onCompare}
             disabled={loading || branches.length === 0}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg shadow-sm transition"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg shadow-sm transition"
           >
             <GitBranch className="w-3.5 h-3.5" />
             <span>Comparar</span>
           </button>
         </div>
 
+        {/* Abas Principais de Navegação: Código vs Walkthrough */}
+        {summary && setActiveMainView && (
+          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <button
+              onClick={() => setActiveMainView('code')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                activeMainView === 'code'
+                  ? 'bg-indigo-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              }`}
+            >
+              <Code2 className="w-3.5 h-3.5" />
+              <span>Código & Diff</span>
+            </button>
+
+            <button
+              onClick={onOpenWalkthrough}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                activeMainView === 'walkthrough'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-emerald-300 hover:bg-slate-900'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Walkthrough da Task</span>
+              <span className="ml-1 text-[10px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 rounded font-mono">
+                {summary.total_files}
+              </span>
+            </button>
+          </div>
+        )}
+
         {/* Ações e Resumo */}
         <div className="flex items-center gap-2">
-          {summary && (
-            <div className="hidden xl:flex items-center gap-3 px-3 py-1.5 bg-slate-950/60 rounded-xl border border-slate-800 text-xs mr-1">
-              <span className="flex items-center gap-1 text-slate-300">
-                <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                <strong>{summary.total_files}</strong> arquivos
-              </span>
-              <span className="text-slate-600">|</span>
-              <span className="text-emerald-400 font-mono">+{summary.total_added}</span>
-              <span className="text-rose-400 font-mono">-{summary.total_deleted}</span>
-              <span className="text-slate-600">|</span>
-              <span className="text-amber-400 text-[11px]">
-                {summary.logic_files_count} lógica / {summary.noise_files_count} ruído
-              </span>
-            </div>
-          )}
-
-          {/* Botão Explicar PR (Walkthrough Narrativo) */}
-          <button
-            onClick={onOpenWalkthrough}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-emerald-500/20 transition"
-            title="Explicar o que foi feito na task contando via código (o que faz cada arquivo novo e modificado)"
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span>Explicar PR</span>
-          </button>
-
           {/* Botão Grafo de Impacto */}
           <button
             onClick={onOpenGraph}
@@ -183,7 +191,7 @@ export default function Header({
           {/* Botão Gerar Prompt Claude */}
           <button
             onClick={onOpenClaudePrompt}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-purple-500/20 transition"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-purple-500/20 transition"
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>Gerar Prompt Claude</span>
@@ -193,7 +201,7 @@ export default function Header({
 
       {/* Barra de Progresso de Revisão do PR */}
       {progress && progress.total > 0 && (
-        <div className="mt-2.5 flex items-center gap-3 text-xs">
+        <div className="mt-2 flex items-center gap-3 text-xs">
           <div className="flex-1 bg-slate-800/80 rounded-full h-1.5 overflow-hidden">
             <div
               className="bg-gradient-to-r from-emerald-500 to-indigo-500 h-full transition-all duration-300"

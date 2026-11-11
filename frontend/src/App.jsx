@@ -49,8 +49,8 @@ export default function App() {
   const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
   const [generatedPromptText, setGeneratedPromptText] = useState('');
 
-  // Modal Walkthrough (O que mudou contando via código)
-  const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
+  // Visualização Ativa Principal: 'code' | 'walkthrough'
+  const [activeMainView, setActiveMainView] = useState('code');
   const [walkthroughData, setWalkthroughData] = useState(null);
   const [loadingWalkthrough, setLoadingWalkthrough] = useState(false);
 
@@ -113,6 +113,7 @@ export default function App() {
       const data = await compareBranches(repoPath, baseBranch, headBranch);
       setCompareData(data);
       setWalkthroughData(null);
+      setActiveMainView('code');
       // Seleciona o primeiro arquivo da lista se houver
       const firstFile = data.summary?.all_files?.[0];
       if (firstFile) {
@@ -130,6 +131,7 @@ export default function App() {
 
   const handleSelectFile = async (file) => {
     setSelectedFile(file);
+    setActiveMainView('code');
     setLoadingDiff(true);
     setErrorMessage(null);
     try {
@@ -191,9 +193,31 @@ export default function App() {
       setErrorMessage('Por favor, compare as branches antes de solicitar o walkthrough da task.');
       return;
     }
-    setIsWalkthroughOpen(true);
+    setActiveMainView('walkthrough');
     if (walkthroughData) return; // Já foi carregado para esta comparação
 
+    setLoadingWalkthrough(true);
+    setErrorMessage(null);
+    try {
+      const res = await explainPR(
+        repoPath,
+        baseBranch,
+        headBranch,
+        aiProvider,
+        geminiApiKey
+      );
+      setWalkthroughData(res);
+      if (res.error) {
+        setErrorMessage(res.error);
+      }
+    } catch (err) {
+      setErrorMessage(`Erro ao gerar explicação do PR: ${err.message}`);
+    } finally {
+      setLoadingWalkthrough(false);
+    }
+  };
+
+  const handleReloadWalkthrough = async () => {
     setLoadingWalkthrough(true);
     setErrorMessage(null);
     try {
@@ -302,6 +326,8 @@ export default function App() {
         onOpenGraph={() => setIsGraphOpen(true)}
         onOpenClaudePrompt={handleOpenClaudePromptModal}
         onOpenWalkthrough={handleOpenWalkthrough}
+        activeMainView={activeMainView}
+        setActiveMainView={setActiveMainView}
       />
 
       {/* Alerta de Erro se houver */}
@@ -329,9 +355,24 @@ export default function App() {
         selectedFile={selectedFile}
       />
 
-      {/* Área Principal: Árvore à Esquerda + Visualizador de Código à Direita */}
+      {/* Área Principal: Abas Código & Diff vs Walkthrough da Task */}
       <main className="flex-1 flex overflow-hidden">
-        {compareData?.summary?.layers ? (
+        {activeMainView === 'walkthrough' ? (
+          <PRWalkthroughModal
+            mode="fullpage"
+            isOpen={true}
+            data={walkthroughData}
+            loading={loadingWalkthrough}
+            onSelectFile={(filePath) => {
+              handleSelectFileFromWalkthrough(filePath);
+              setActiveMainView('code');
+            }}
+            onReload={handleReloadWalkthrough}
+            repoPath={repoPath}
+            baseBranch={baseBranch}
+            headBranch={headBranch}
+          />
+        ) : compareData?.summary?.layers ? (
           <>
             <FileTree
               layers={compareData.summary.layers}
@@ -382,18 +423,6 @@ export default function App() {
           </div>
         )}
       </main>
-
-      {/* Modal: Walkthrough Narrativo da Task (O que mudou contando via código) */}
-      <PRWalkthroughModal
-        isOpen={isWalkthroughOpen}
-        onClose={() => setIsWalkthroughOpen(false)}
-        data={walkthroughData}
-        loading={loadingWalkthrough}
-        onSelectFile={handleSelectFileFromWalkthrough}
-        repoPath={repoPath}
-        baseBranch={baseBranch}
-        headBranch={headBranch}
-      />
 
       {/* Modal: Mapa Arquitetural do PR */}
       <DependencyGraph
