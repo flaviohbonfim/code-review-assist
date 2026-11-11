@@ -1,5 +1,5 @@
 import React from 'react';
-import { GitBranch, GitPullRequest, Folder, FolderOpen, Sparkles, Network, RefreshCw, Layers } from 'lucide-react';
+import { GitBranch, GitPullRequest, Folder, FolderOpen, Sparkles, Network, RefreshCw, Layers, BookOpen } from 'lucide-react';
 
 export default function Header({
   repoPath,
@@ -16,7 +16,8 @@ export default function Header({
   loading,
   progress,
   onOpenGraph,
-  onOpenClaudePrompt
+  onOpenClaudePrompt,
+  onOpenWalkthrough
 }) {
   return (
     <header className="bg-slate-900 border-b border-slate-800 px-6 py-3.5 sticky top-0 z-30 shadow-md">
@@ -142,9 +143,9 @@ export default function Header({
         </div>
 
         {/* Ações e Resumo */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           {summary && (
-            <div className="hidden lg:flex items-center gap-3 px-3 py-1.5 bg-slate-950/60 rounded-xl border border-slate-800 text-xs">
+            <div className="hidden xl:flex items-center gap-3 px-3 py-1.5 bg-slate-950/60 rounded-xl border border-slate-800 text-xs mr-1">
               <span className="flex items-center gap-1 text-slate-300">
                 <Layers className="w-3.5 h-3.5 text-indigo-400" />
                 <strong>{summary.total_files}</strong> arquivos
@@ -159,6 +160,16 @@ export default function Header({
             </div>
           )}
 
+          {/* Botão Explicar PR (Walkthrough Narrativo) */}
+          <button
+            onClick={onOpenWalkthrough}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-emerald-500/20 transition"
+            title="Explicar o que foi feito na task contando via código (o que faz cada arquivo novo e modificado)"
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Explicar PR</span>
+          </button>
+
           {/* Botão Grafo de Impacto */}
           <button
             onClick={onOpenGraph}
@@ -172,7 +183,7 @@ export default function Header({
           {/* Botão Gerar Prompt Claude */}
           <button
             onClick={onOpenClaudePrompt}
-            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-purple-500/20 transition"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold rounded-lg shadow-md shadow-purple-500/20 transition"
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>Gerar Prompt Claude</span>

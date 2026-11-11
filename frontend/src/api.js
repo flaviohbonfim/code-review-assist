@@ -87,6 +87,25 @@ export async function runAIReview(code, lens, filePath = '', provider = 'claude'
   return res.json();
 }
 
+export async function explainPR(repoPath, baseBranch, headBranch, provider = 'claude', apiKey = null) {
+  const res = await fetch(`${API_BASE}/ai/explain-pr`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      repo_path: repoPath,
+      base_branch: baseBranch,
+      head_branch: headBranch,
+      provider,
+      api_key: apiKey
+    })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Falha ao gerar explicação do PR' }));
+    throw new Error(err.detail || 'Falha ao gerar explicação do PR');
+  }
+  return res.json();
+}
+
 export async function generateClaudePrompt(repoName, baseBranch, headBranch, reviewNotes) {
   const res = await fetch(`${API_BASE}/ai/generate-claude-prompt`, {
     method: 'POST',

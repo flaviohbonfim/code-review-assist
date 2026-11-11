@@ -44,6 +44,13 @@ class AIReviewRequest(BaseModel):
     provider: str = "claude" # "claude" ou "gemini"
     api_key: Optional[str] = None
 
+class ExplainPRRequest(BaseModel):
+    repo_path: str
+    base_branch: str
+    head_branch: str
+    provider: str = "claude"
+    api_key: Optional[str] = None
+
 class GenerateClaudePromptRequest(BaseModel):
     repo_name: str
     base_branch: str
@@ -122,7 +129,6 @@ def compare_branches(req: CompareRequest):
                 dotted = os.path.splitext(p)[0].replace("/", ".")
                 module_to_path[dotted] = p
 
-        # Extrai imports dos arquivos Python (limitado aos primeiros 60 para manter performance em PRs gigantes)
         py_files = [f for f in raw_files if f["path"].endswith(".py") and f["status"] != "deleted"][:60]
         seen_edges = set()
         for f in py_files:
@@ -166,7 +172,6 @@ def get_file_diff(req: FileDiffRequest):
         git = GitService(req.repo_path)
         diff_data = git.get_detailed_file_diff(req.base_branch, req.head_branch, req.file_path)
 
-        # Se for Python, analisa com AST para identificar escopos e blocos que podem ser colapsados (unchanged)
         foldable_ranges = []
         scopes = []
         if req.file_path.endswith(".py") and diff_data["head_content"]:
@@ -196,6 +201,57 @@ async def review_code(req: AIReviewRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/ai/explain-pr")
+async def explain_pr(req: ExplainPRRequest):
+    """Lê todas as alterações lógicas e gera o walkthrough narrativo contando via código."""
+    try:
+        git = GitService(req.repo_path)
+        commits = git.get_commit_summary(req.base_branch, req.head_branch)
+        raw_files = git.get_changed_files(req.base_branch, req.head_branch)
+
+        logic_files = []
+        for f in raw_files:
+            cat = Categorizer.categorize_file(f)
+            if not cat["is_mechanical_noise"]:
+                logic_files.append(cat)
+
+        logic_files.sort(key=lambda x: x.get("added", 0) + x.get("deleted", 0), reverse=True)
+        top_files = logic_files[:25]
+
+        files_summary = []
+        for f in top_files:
+            p = f["path"]
+            info = {
+                "path": p,
+                "filename": f["filename"],
+                "status": f["status"],
+                "layer": f["layer"],
+                "added_lines": f["added"],
+                "deleted_lines": f["deleted"],
+                "scopes": []
+            }
+            if p.endswith(".py") and f["status"] != "deleted":
+                content = git.get_file_content_at_ref(req.head_branch, p)
+                if content:
+                    scopes = ASTService.parse_python_scopes(content)
+                    info["scopes"] = [
+                        {"type": s["type"], "name": s["name"], "params": s["params"], "docstring": s["docstring"][:150] if s["docstring"] else ""}
+                        for s in scopes[:10]
+                    ]
+            files_summary.append(info)
+
+        return await AIService.explain_pr(
+            repo_name=os.path.basename(git.repo_path),
+            base_branch=req.base_branch,
+            head_branch=req.head_branch,
+            commits=commits,
+            files_summary=files_summary,
+            provider=req.provider,
+            api_key=req.api_key
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/ai/generate-claude-prompt")
 def generate_claude_prompt(req: GenerateClaudePromptRequest):
     prompt = AIService.generate_claude_prompt(
@@ -206,7 +262,6 @@ def generate_claude_prompt(req: GenerateClaudePromptRequest):
     )
     return {"prompt": prompt}
 
-# Se existir a pasta build/dist do frontend, serve diretamente
 dist_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
 if os.path.isdir(dist_dir):
     app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")

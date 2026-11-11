@@ -5,13 +5,15 @@ import CodeViewer from './components/CodeViewer';
 import ReviewLensesBar from './components/ReviewLensesBar';
 import DependencyGraph from './components/DependencyGraph';
 import ClaudePromptModal from './components/ClaudePromptModal';
+import PRWalkthroughModal from './components/PRWalkthroughModal';
 import {
   listBranches,
   compareBranches,
   getFileDiff,
   runAIReview,
   generateClaudePrompt,
-  selectFolderViaFinder
+  selectFolderViaFinder,
+  explainPR
 } from './api';
 
 export default function App() {
@@ -47,6 +49,11 @@ export default function App() {
   const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
   const [generatedPromptText, setGeneratedPromptText] = useState('');
 
+  // Modal Walkthrough (O que mudou contando via código)
+  const [isWalkthroughOpen, setIsWalkthroughOpen] = useState(false);
+  const [walkthroughData, setWalkthroughData] = useState(null);
+  const [loadingWalkthrough, setLoadingWalkthrough] = useState(false);
+
   // Carrega branches ao iniciar se repoPath estiver preenchido
   useEffect(() => {
     if (repoPath) {
@@ -72,6 +79,7 @@ export default function App() {
       setCompareData(null);
       setSelectedFile(null);
       setDiffData(null);
+      setWalkthroughData(null);
     } catch (err) {
       setErrorMessage(`Erro ao selecionar pasta no Finder: ${err.message}`);
     } finally {
@@ -104,6 +112,7 @@ export default function App() {
     try {
       const data = await compareBranches(repoPath, baseBranch, headBranch);
       setCompareData(data);
+      setWalkthroughData(null);
       // Seleciona o primeiro arquivo da lista se houver
       const firstFile = data.summary?.all_files?.[0];
       if (firstFile) {
@@ -177,6 +186,43 @@ export default function App() {
     }
   };
 
+  const handleOpenWalkthrough = async () => {
+    if (!compareData) {
+      setErrorMessage('Por favor, compare as branches antes de solicitar o walkthrough da task.');
+      return;
+    }
+    setIsWalkthroughOpen(true);
+    if (walkthroughData) return; // Já foi carregado para esta comparação
+
+    setLoadingWalkthrough(true);
+    setErrorMessage(null);
+    try {
+      const res = await explainPR(
+        repoPath,
+        baseBranch,
+        headBranch,
+        aiProvider,
+        geminiApiKey
+      );
+      setWalkthroughData(res);
+      if (res.error) {
+        setErrorMessage(res.error);
+      }
+    } catch (err) {
+      setErrorMessage(`Erro ao gerar explicação do PR: ${err.message}`);
+    } finally {
+      setLoadingWalkthrough(false);
+    }
+  };
+
+  const handleSelectFileFromWalkthrough = (filePath) => {
+    const allFiles = compareData?.summary?.all_files || [];
+    const found = allFiles.find((f) => f.path === filePath);
+    if (found) {
+      handleSelectFile(found);
+    }
+  };
+
   const handleAddManualNote = (filePath, line, description) => {
     const newNote = {
       file_path: filePath,
@@ -193,7 +239,6 @@ export default function App() {
     }));
 
     setAllReviewNotes((prev) => [...prev, newNote]);
-    // Marca o arquivo com flag automaticamente
     handleSetFileStatus(filePath, 'flagged');
   };
 
@@ -251,6 +296,7 @@ export default function App() {
         progress={{ reviewed: reviewedCount, total: totalFiles }}
         onOpenGraph={() => setIsGraphOpen(true)}
         onOpenClaudePrompt={handleOpenClaudePromptModal}
+        onOpenWalkthrough={handleOpenWalkthrough}
       />
 
       {/* Alerta de Erro se houver */}
@@ -331,6 +377,15 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Modal: Walkthrough Narrativo da Task (O que mudou contando via código) */}
+      <PRWalkthroughModal
+        isOpen={isWalkthroughOpen}
+        onClose={() => setIsWalkthroughOpen(false)}
+        data={walkthroughData}
+        loading={loadingWalkthrough}
+        onSelectFile={handleSelectFileFromWalkthrough}
+      />
 
       {/* Modal: Mapa Arquitetural do PR */}
       <DependencyGraph

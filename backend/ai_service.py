@@ -20,7 +20,7 @@ Retorne sua resposta estritamente em formato JSON válido contendo uma lista de 
   "issues": [
     {
       "line": 42,
-      "severity": "warning", // "error", "warning" ou "suggestion"
+      "severity": "warning",
       "lens": "solid",
       "principle": "SRP",
       "title": "Violação de Responsabilidade Única",
@@ -109,12 +109,10 @@ class AIService:
     def _clean_json_response(raw_text: str) -> Dict[str, Any]:
         """Extrai bloco JSON limpo de respostas com Markdown ou texto extra."""
         text = raw_text.strip()
-        # Remove blocos ```json ... ```
         m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", text)
         if m:
             text = m.group(1).strip()
         else:
-            # Tenta pegar entre a primeira { e a última }
             start = text.find("{")
             end = text.rfind("}")
             if start != -1 and end != -1 and end > start:
@@ -131,9 +129,7 @@ class AIService:
 
     @classmethod
     async def review_with_claude_cli(cls, code: str, lens: str, file_path: str = "") -> Dict[str, Any]:
-        """
-        Executa a revisão via Claude CLI local (`claude -p "..."`).
-        """
+        """Executa a revisão via Claude CLI local (claude -p '...')."""
         prompt_instruction = LENS_PROMPTS.get(lens, LENS_PROMPTS["clean_code"])
         full_prompt = (
             f"{prompt_instruction}\n\n"
@@ -173,9 +169,7 @@ class AIService:
 
     @classmethod
     async def review_with_gemini(cls, code: str, lens: str, file_path: str = "", api_key: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Executa a revisão via Gemini API (REST direto ou com GEMINI_API_KEY).
-        """
+        """Executa a revisão via Gemini API."""
         key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         if not key:
             return {
@@ -192,17 +186,10 @@ class AIService:
             f"Retorne APENAS o JSON especificado sem rodeios."
         )
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={key}"
         payload = {
-            "contents": [
-                {
-                    "parts": [{"text": prompt}]
-                }
-            ],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "temperature": 0.2
-            }
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2}
         }
 
         try:
@@ -233,9 +220,7 @@ class AIService:
 
     @classmethod
     def run_static_analysis(cls, code: str) -> Dict[str, Any]:
-        """
-        Análise estática instantânea baseada em AST para apontar falhas comuns sem gastar tokens.
-        """
+        """Análise estática instantânea baseada em AST para apontar falhas comuns sem gastar tokens."""
         import ast
         issues = []
         try:
@@ -253,7 +238,6 @@ class AIService:
                 "summary": f"Erro de sintaxe encontrado na linha {e.lineno}."
             }
 
-        # 1. Argumentos padrão mutáveis
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 for default in node.args.defaults + node.args.kw_defaults:
@@ -267,7 +251,6 @@ class AIService:
                             "suggested_fix": "Substituir por None como padrão e inicializar dentro do corpo da função."
                         })
 
-                # 2. Docstrings vazias ou ausentes em funções com mais de 10 linhas
                 docstring = ast.get_docstring(node)
                 end_lineno = getattr(node, "end_lineno", node.lineno)
                 if not docstring and (end_lineno - node.lineno > 10):
@@ -280,7 +263,6 @@ class AIService:
                         "suggested_fix": f"Adicionar docstring detalhando o propósito e comportamento de '{node.name}'."
                     })
 
-            # 3. Except genérico silencioso (except: pass)
             elif isinstance(node, ast.ExceptHandler):
                 if len(node.body) == 1 and isinstance(node.body[0], ast.Pass):
                     issues.append({
@@ -304,10 +286,7 @@ class AIService:
         head_branch: str,
         review_notes: List[Dict[str, Any]]
     ) -> str:
-        """
-        Gera um prompt estruturado para o Claude Code corrigir tudo de uma só vez,
-        contendo o arquivo, linhas, problema encontrado e sugestão de correção.
-        """
+        """Gera um prompt estruturado para o Claude Code corrigir tudo de uma só vez."""
         if not review_notes:
             return (
                 "Nenhuma observação ou pendência foi marcada nesta revisão. "
@@ -325,7 +304,6 @@ class AIService:
             ""
         ]
 
-        # Agrupa por arquivo
         by_file: Dict[str, List[Dict[str, Any]]] = {}
         for note in review_notes:
             f = note.get("file_path", "Arquivo Geral")
@@ -361,3 +339,115 @@ class AIService:
         ])
 
         return "\n".join(prompt_lines)
+
+    @classmethod
+    async def explain_pr(
+        cls,
+        repo_name: str,
+        base_branch: str,
+        head_branch: str,
+        commits: List[Dict[str, str]],
+        files_summary: List[Dict[str, Any]],
+        provider: str = "claude",
+        api_key: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Gera uma explicação técnica narrativa e detalhada do PR (Walkthrough contando via código):
+        o que foi adicionado, o que faz cada arquivo novo e como os arquivos existentes foram alterados.
+        """
+        prompt = f"""Você é um Engenheiro de Software Principal realizando o walkthrough técnico completo de um Pull Request ({repo_name}).
+Sua missão é explicar para outros desenvolvedores exatamente o que foi feito na aplicação, contando a história através do código alterado e novo.
+
+INFORMAÇÕES DA TASK:
+- Repositório: {repo_name}
+- Branches: {base_branch} -> {head_branch}
+- Commits na task: {json.dumps(commits, ensure_ascii=False)}
+
+ARQUIVOS DE LÓGICA E MODIFICAÇÕES DE CÓDIGO:
+{json.dumps(files_summary, ensure_ascii=False, indent=2)}
+
+Sua resposta DEVE ser estritamente em formato JSON válido contendo:
+{{
+  "executive_summary": "Resumo claro e direto em 2-3 frases do que este PR implementa e qual capacidade de negócio a aplicação ganhou.",
+  "new_capabilities": [
+    "Capacidade 1 que o sistema agora possui",
+    "Capacidade 2..."
+  ],
+  "architectural_story": "Narrativa técnica explicando como o fluxo de execução funciona entre os arquivos (ex: A rota X recebe a requisição, chama o novo serviço Y, que processa a regra Z e persiste no Model W).",
+  "files_explained": [
+    {{
+      "path": "caminho/do/arquivo.py",
+      "filename": "arquivo.py",
+      "status": "added",
+      "badge_label": "Novo Arquivo",
+      "purpose": "O que este arquivo faz e qual sua responsabilidade no sistema.",
+      "code_changes": "O que especificamente foi adicionado ou modificado via código (cite nomes reais de classes, métodos, decorators, parâmetros e regras novas). Exemplo: 'Adicionou o método process_payment que valida o saldo e despacha evento para a fila.'",
+      "impact": "Como esta alteração impacta o restante do app."
+    }}
+  ]
+}}
+
+IMPORTANTE: Seja específico e focado em código real, sem inventar arquivos que não estão na lista.
+"""
+        if provider == "claude":
+            claude_bin = "/opt/homebrew/bin/claude"
+            if not os.path.exists(claude_bin):
+                claude_bin = "claude"
+            env = os.environ.copy()
+            env["PATH"] = f"/opt/homebrew/bin:/usr/local/bin:/usr/bin:{env.get('PATH', '')}"
+            try:
+                process = subprocess.run(
+                    [claude_bin, "-p", prompt],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    timeout=120,
+                    encoding="utf-8",
+                    errors="replace"
+                )
+                if process.returncode != 0:
+                    return {
+                        "error": f"Erro no Claude CLI: {process.stderr.strip() or process.stdout.strip()}",
+                        "executive_summary": "Falha na geração do walkthrough via Claude CLI.",
+                        "files_explained": []
+                    }
+                return cls._clean_json_response(process.stdout)
+            except Exception as e:
+                return {
+                    "error": f"Erro ao chamar Claude CLI: {str(e)}",
+                    "executive_summary": "Erro na execução do Claude CLI.",
+                    "files_explained": []
+                }
+        elif provider == "gemini":
+            key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+            if not key:
+                return {
+                    "error": "Chave da API do Gemini não configurada.",
+                    "executive_summary": "Chave Gemini ausente.",
+                    "files_explained": []
+                }
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2}
+            }
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=90) as resp:
+                    raw_body = resp.read().decode("utf-8", errors="replace")
+                    data = json.loads(raw_body)
+                    text = data["candidates"][0]["content"]["parts"][0]["text"]
+                    return cls._clean_json_response(text)
+            except Exception as e:
+                return {
+                    "error": f"Erro na API Gemini: {str(e)}",
+                    "executive_summary": "Erro de conexão com o Gemini.",
+                    "files_explained": []
+                }
+        else:
+            return {"error": f"Provedor {provider} desconhecido.", "files_explained": []}
