@@ -41,14 +41,14 @@ class AIReviewRequest(BaseModel):
     code: str
     lens: str # "solid", "clean_code", "docstrings", "bugs_security", "static_analysis"
     file_path: str = ""
-    provider: str = "claude" # "claude" ou "gemini"
+    provider: str = "antigravity" # "antigravity", "claude" ou "gemini"
     api_key: Optional[str] = None
 
 class ExplainPRRequest(BaseModel):
     repo_path: str
     base_branch: str
     head_branch: str
-    provider: str = "claude"
+    provider: str = "antigravity"
     api_key: Optional[str] = None
 
 class TestGeminiRequest(BaseModel):
@@ -197,41 +197,70 @@ async def review_code(req: AIReviewRequest):
 
         if req.provider == "claude":
             return await AIService.review_with_claude_cli(req.code, req.lens, req.file_path)
+        elif req.provider == "antigravity":
+            return await AIService.review_with_antigravity_cli(req.code, req.lens, req.file_path)
         elif req.provider == "gemini":
             return await AIService.review_with_gemini(req.code, req.lens, req.file_path, req.api_key)
         else:
-            raise HTTPException(status_code=400, detail=f"Provedor '{req.provider}' desconhecido. Use 'claude' ou 'gemini'.")
+            raise HTTPException(status_code=400, detail=f"Provedor '{req.provider}' desconhecido. Use 'antigravity' ou 'claude'.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/ai/explain-pr")
 async def explain_pr(req: ExplainPRRequest):
-    """Lê todas as alterações lógicas e gera o walkthrough narrativo contando via código."""
+    """Lê todas as alterações lógicas e gera o walkthrough narrativo contando via código, com análise Sênior (SOLID, Clean Code, YAGNI)."""
     try:
         git = GitService(req.repo_path)
         commits = git.get_commit_summary(req.base_branch, req.head_branch)
         raw_files = git.get_changed_files(req.base_branch, req.head_branch)
 
-        logic_files = []
-        for f in raw_files:
-            cat = Categorizer.categorize_file(f)
-            if not cat["is_mechanical_noise"]:
-                logic_files.append(cat)
+        # 1. Categoriza TODOS os arquivos do PR
+        all_categorized = [Categorizer.categorize_file(f) for f in raw_files]
+        all_added_files = [f for f in all_categorized if f["status"] == "added"]
+        all_modified_files = [f for f in all_categorized if f["status"] in ("modified", "renamed")]
+        all_deleted_files = [f for f in all_categorized if f["status"] == "deleted"]
 
-        # Prioriza arquivos essenciais de arquitetura (Services, Routers, Models e novos arquivos)
-        def file_priority(f):
+        # Função para ranquear os arquivos mais relevantes de arquitetura
+        def layer_priority(f):
             layer = f.get("layer", "")
             is_core = layer in ["Domínio / Services", "API / Controllers / Routers", "Models & Schemas"]
-            is_added = f.get("status") == "added"
-            score = (2 if is_core else 0) + (1 if is_added else 0)
+            score = 3 if is_core else (1 if layer == "Testes" else 2)
             changes = f.get("added", 0) + f.get("deleted", 0)
             return (-score, -changes)
 
-        logic_files.sort(key=file_priority)
-        top_files = logic_files[:10]
+        # 2. Seleciona os principais arquivos NOVOS para análise detalhada da IA
+        new_logic = [f for f in all_added_files if not f["is_mechanical_noise"]]
+        new_logic.sort(key=layer_priority)
+        top_new_files = new_logic[:15]
 
-        files_summary = []
-        for f in top_files:
+        new_files_summary = []
+        for f in top_new_files:
+            p = f["path"]
+            info = {
+                "path": p,
+                "filename": f["filename"],
+                "status": "added",
+                "layer": f["layer"],
+                "added_lines": f["added"],
+                "symbols": []
+            }
+            if p.endswith(".py"):
+                content = git.get_file_content_at_ref(req.head_branch, p)
+                if content:
+                    scopes = ASTService.parse_python_scopes(content)
+                    info["symbols"] = [
+                        f"{s['type']} {s['name']}({', '.join(s['params'][:4])})"
+                        for s in scopes[:8]
+                    ]
+            new_files_summary.append(info)
+
+        # 3. Seleciona os principais arquivos MODIFICADOS para análise de impacto e regressão
+        mod_logic = [f for f in all_modified_files if not f["is_mechanical_noise"]]
+        mod_logic.sort(key=layer_priority)
+        top_mod_files = mod_logic[:15]
+
+        modified_files_summary = []
+        for f in top_mod_files:
             p = f["path"]
             info = {
                 "path": p,
@@ -242,7 +271,7 @@ async def explain_pr(req: ExplainPRRequest):
                 "deleted_lines": f["deleted"],
                 "symbols": []
             }
-            if p.endswith(".py") and f["status"] != "deleted":
+            if p.endswith(".py"):
                 content = git.get_file_content_at_ref(req.head_branch, p)
                 if content:
                     scopes = ASTService.parse_python_scopes(content)
@@ -250,17 +279,37 @@ async def explain_pr(req: ExplainPRRequest):
                         f"{s['type']} {s['name']}({', '.join(s['params'][:4])})"
                         for s in scopes[:6]
                     ]
-            files_summary.append(info)
+            modified_files_summary.append(info)
 
-        return await AIService.explain_pr(
+        # 4. Executa a IA para produzir o walkthrough e a auditoria Sênior
+        ai_result = await AIService.explain_pr(
             repo_name=os.path.basename(git.repo_path),
             base_branch=req.base_branch,
             head_branch=req.head_branch,
             commits=commits,
-            files_summary=files_summary,
+            new_files_summary=new_files_summary,
+            modified_files_summary=modified_files_summary,
             provider=req.provider,
             api_key=req.api_key
         )
+
+        # 5. Mescla os metadados completos de TODOS os arquivos do PR
+        return {
+            **ai_result,
+            "all_added_files": all_added_files,
+            "all_modified_files": all_modified_files,
+            "all_deleted_files": all_deleted_files,
+            "stats": {
+                "total_files": len(raw_files),
+                "total_added": len(all_added_files),
+                "total_modified": len(all_modified_files),
+                "total_deleted": len(all_deleted_files),
+                "total_lines_added": sum(f.get("added", 0) for f in raw_files),
+                "total_lines_deleted": sum(f.get("deleted", 0) for f in raw_files),
+                "analyzed_new_count": len(new_files_summary),
+                "analyzed_modified_count": len(modified_files_summary)
+            }
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -273,6 +322,11 @@ def generate_claude_prompt(req: GenerateClaudePromptRequest):
         req.review_notes
     )
     return {"prompt": prompt}
+
+@app.post("/api/ai/test-antigravity")
+def test_antigravity():
+    """Testa se o Antigravity CLI (agy) está acessível e operacional na máquina."""
+    return AIService.test_antigravity_cli()
 
 @app.post("/api/ai/test-gemini")
 def test_gemini(req: TestGeminiRequest):

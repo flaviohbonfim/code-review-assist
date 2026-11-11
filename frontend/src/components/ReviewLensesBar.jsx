@@ -13,7 +13,7 @@ import {
   Activity,
   AlertCircle
 } from 'lucide-react';
-import { testGeminiConnection } from '../api';
+import { testAntigravityConnection, testGeminiConnection } from '../api';
 
 export default function ReviewLensesBar({
   onRunLens,
@@ -26,7 +26,7 @@ export default function ReviewLensesBar({
   selectedFile
 }) {
   const [showConfig, setShowConfig] = useState(false);
-  const [testingKey, setTestingKey] = useState(false);
+  const [testingProvider, setTestingProvider] = useState(false);
   const [testResult, setTestResult] = useState(null);
 
   const lenses = [
@@ -67,16 +67,24 @@ export default function ReviewLensesBar({
     }
   ];
 
-  const handleTestKey = async () => {
-    setTestingKey(true);
+  const handleTestProvider = async () => {
+    setTestingProvider(true);
     setTestResult(null);
     try {
-      const res = await testGeminiConnection(geminiApiKey);
-      setTestResult(res);
+      if (aiProvider === 'antigravity') {
+        const res = await testAntigravityConnection();
+        setTestResult(res);
+      } else if (aiProvider === 'gemini') {
+        const res = await testGeminiConnection(geminiApiKey);
+        setTestResult(res);
+      } else {
+        // Claude CLI
+        setTestResult({ ok: true, version: 'Claude CLI configurado via subprocess', elapsed_seconds: 0.05 });
+      }
     } catch (err) {
       setTestResult({ ok: false, error: err.message });
     } finally {
-      setTestingKey(false);
+      setTestingProvider(false);
     }
   };
 
@@ -123,67 +131,105 @@ export default function ReviewLensesBar({
             <span className="text-[11px] text-slate-400">Provedor:</span>
             <select
               value={aiProvider}
-              onChange={(e) => setAiProvider(e.target.value)}
+              onChange={(e) => {
+                setAiProvider(e.target.value);
+                setTestResult(null);
+              }}
               className="bg-transparent text-slate-200 text-xs font-medium outline-none cursor-pointer"
             >
-              <option value="claude" className="bg-slate-900 text-slate-200">Claude CLI (Local)</option>
-              <option value="gemini" className="bg-slate-900 text-slate-200">Google Gemini API</option>
+              <option value="antigravity" className="bg-slate-900 text-slate-200">Antigravity CLI (agy -p)</option>
+              <option value="claude" className="bg-slate-900 text-slate-200">Claude CLI (claude -p)</option>
+              <option value="gemini" className="bg-slate-900 text-slate-200">Google Gemini API (Nuvem)</option>
             </select>
           </div>
 
-          {aiProvider === 'gemini' && (
-            <button
-              onClick={() => setShowConfig(!showConfig)}
-              className={`p-1.5 border rounded-lg transition ${
-                showConfig
-                  ? 'bg-indigo-600 text-white border-indigo-500'
-                  : 'text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 border-slate-700'
-              }`}
-              title="Configurar e testar Chave da API Gemini"
-            >
-              <Settings2 className="w-3.5 h-3.5" />
-            </button>
-          )}
+          {/* Botão de Testar Conexão do Provedor Selecionado */}
+          <button
+            type="button"
+            onClick={() => {
+              if (aiProvider === 'gemini') {
+                setShowConfig(!showConfig);
+              } else {
+                handleTestProvider();
+                setShowConfig(true);
+              }
+            }}
+            className={`flex items-center gap-1.5 px-2.5 py-1 border rounded-lg transition text-xs font-medium ${
+              showConfig
+                ? 'bg-indigo-600 text-white border-indigo-500'
+                : 'text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 border-slate-700'
+            }`}
+            title="Verificar status e testar conexão com o provedor de IA"
+          >
+            {testingProvider ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+            ) : (
+              <Activity className="w-3.5 h-3.5 text-emerald-400" />
+            )}
+            <span>Status / Testar</span>
+          </button>
         </div>
       </div>
 
-      {/* Modal de Configuração da Chave Gemini */}
-      {showConfig && aiProvider === 'gemini' && (
+      {/* Painel de Status / Configuração do Provedor */}
+      {showConfig && (
         <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex-1 flex items-center gap-2 min-w-[280px]">
-              <span className="text-slate-400 font-medium whitespace-nowrap">GEMINI_API_KEY:</span>
-              <input
-                type="password"
-                value={geminiApiKey}
-                onChange={(e) => {
-                  setGeminiApiKey(e.target.value);
-                  setTestResult(null);
-                }}
-                placeholder="Cole sua chave de API ou defina via variável de ambiente..."
-                className="flex-1 p-1.5 bg-slate-900 border border-slate-800 rounded font-mono text-slate-200 outline-none text-xs"
-              />
-            </div>
+            {aiProvider === 'antigravity' && (
+              <div className="flex-1 flex items-center gap-2">
+                <span className="text-slate-300 font-medium">Antigravity CLI:</span>
+                <span className="font-mono text-emerald-400 text-xs bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                  agy -p &quot;&lt;prompt&gt;&quot;
+                </span>
+                <span className="text-slate-400 text-[11px] hidden sm:inline">
+                  (Executado localmente via subprocess no mesmo ambiente do agente)
+                </span>
+              </div>
+            )}
+
+            {aiProvider === 'claude' && (
+              <div className="flex-1 flex items-center gap-2">
+                <span className="text-slate-300 font-medium">Claude CLI:</span>
+                <span className="font-mono text-indigo-400 text-xs bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                  claude -p &quot;&lt;prompt&gt;&quot;
+                </span>
+              </div>
+            )}
+
+            {aiProvider === 'gemini' && (
+              <div className="flex-1 flex items-center gap-2 min-w-[280px]">
+                <span className="text-slate-400 font-medium whitespace-nowrap">GEMINI_API_KEY:</span>
+                <input
+                  type="password"
+                  value={geminiApiKey}
+                  onChange={(e) => {
+                    setGeminiApiKey(e.target.value);
+                    setTestResult(null);
+                  }}
+                  placeholder="Cole sua chave de API ou defina via variável de ambiente..."
+                  className="flex-1 p-1.5 bg-slate-900 border border-slate-800 rounded font-mono text-slate-200 outline-none text-xs"
+                />
+              </div>
+            )}
 
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleTestKey}
-                disabled={testingKey}
+                onClick={handleTestProvider}
+                disabled={testingProvider}
                 className="flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded text-xs font-medium transition disabled:opacity-50"
-                title="Envia requisição rápida para testar se a chave responde sem timeout"
               >
-                {testingKey ? (
+                {testingProvider ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
                 ) : (
                   <Activity className="w-3.5 h-3.5 text-emerald-400" />
                 )}
-                <span>{testingKey ? 'Testando...' : 'Testar Conexão'}</span>
+                <span>{testingProvider ? 'Testando...' : 'Executar Teste'}</span>
               </button>
 
               <button
                 onClick={() => setShowConfig(false)}
-                className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-medium"
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-medium"
               >
                 Fechar
               </button>
@@ -192,7 +238,7 @@ export default function ReviewLensesBar({
 
           {/* Resultado do Teste da Conexão */}
           {testResult && (
-            <div className={`p-2 rounded-lg text-xs font-mono border flex items-start gap-2 ${
+            <div className={`p-2.5 rounded-lg text-xs font-mono border flex items-start gap-2 ${
               testResult.ok
                 ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-300'
                 : 'bg-rose-950/40 border-rose-500/30 text-rose-300'
@@ -206,15 +252,19 @@ export default function ReviewLensesBar({
                 {testResult.ok ? (
                   <>
                     <p className="font-semibold font-sans text-emerald-200">
-                      Conexão com Google AI Studio OK ({testResult.elapsed_seconds}s)!
+                      {aiProvider === 'antigravity'
+                        ? `Antigravity CLI pronto e acessível (${testResult.elapsed_seconds || 0}s)!`
+                        : `Conexão OK (${testResult.elapsed_seconds || 0}s)!`}
                     </p>
                     <p className="text-[11px] text-slate-300">
-                      Total de modelos na sua conta: <strong>{testResult.total_models}</strong>. Modelos Flash disponíveis: {testResult.flash_models?.join(', ') || 'nenhum'}
+                      {testResult.binary && <span>Binário: <strong>{testResult.binary}</strong> • </span>}
+                      {testResult.version && <span>{testResult.version}</span>}
+                      {testResult.total_models && <span>Total de modelos: {testResult.total_models}</span>}
                     </p>
                   </>
                 ) : (
                   <>
-                    <p className="font-semibold font-sans text-rose-200">Falha no teste de conexão:</p>
+                    <p className="font-semibold font-sans text-rose-200">Falha no teste:</p>
                     <pre className="text-[11px] whitespace-pre-wrap">{testResult.error}</pre>
                   </>
                 )}

@@ -9,7 +9,7 @@ echo "=== Iniciando Code Review Assist ==="
 cd "$DIR/backend"
 if command -v poetry &> /dev/null && [ -f "pyproject.toml" ]; then
     echo "-> Instalando/verificando dependências Python com Poetry..."
-    poetry install --no-interaction
+    poetry install --no-interaction --no-root
     echo "-> Subindo Backend FastAPI com Poetry na porta 8000..."
     poetry run uvicorn main:app --reload --host 127.0.0.1 --port 8000 &
     BACKEND_PID=$!

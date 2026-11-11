@@ -39,7 +39,7 @@ export default function App() {
   const [allReviewNotes, setAllReviewNotes] = useState([]);
 
   // IA Lenses
-  const [aiProvider, setAiProvider] = useState('claude'); // 'claude' ou 'gemini'
+  const [aiProvider, setAiProvider] = useState('antigravity'); // 'antigravity' | 'claude' | 'gemini'
   const [geminiApiKey, setGeminiApiKey] = useState('');
   const [loadingLens, setLoadingLens] = useState(false);
   const [currentLens, setCurrentLens] = useState(null);
@@ -217,10 +217,15 @@ export default function App() {
 
   const handleSelectFileFromWalkthrough = (filePath) => {
     const allFiles = compareData?.summary?.all_files || [];
-    const found = allFiles.find((f) => f.path === filePath);
-    if (found) {
-      handleSelectFile(found);
+    let found = allFiles.find((f) => f.path === filePath);
+    if (!found) {
+      found = {
+        path: filePath,
+        filename: filePath.split('/').pop(),
+        status: 'modified'
+      };
     }
+    handleSelectFile(found);
   };
 
   const handleAddManualNote = (filePath, line, description) => {
@@ -385,6 +390,9 @@ export default function App() {
         data={walkthroughData}
         loading={loadingWalkthrough}
         onSelectFile={handleSelectFileFromWalkthrough}
+        repoPath={repoPath}
+        baseBranch={baseBranch}
+        headBranch={headBranch}
       />
 
       {/* Modal: Mapa Arquitetural do PR */}

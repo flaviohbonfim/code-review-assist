@@ -68,7 +68,7 @@ export async function getFileDiff(repoPath, baseBranch, headBranch, filePath) {
   return res.json();
 }
 
-export async function runAIReview(code, lens, filePath = '', provider = 'claude', apiKey = null) {
+export async function runAIReview(code, lens, filePath = '', provider = 'antigravity', apiKey = null) {
   const res = await fetch(`${API_BASE}/ai/review`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -87,7 +87,7 @@ export async function runAIReview(code, lens, filePath = '', provider = 'claude'
   return res.json();
 }
 
-export async function explainPR(repoPath, baseBranch, headBranch, provider = 'claude', apiKey = null) {
+export async function explainPR(repoPath, baseBranch, headBranch, provider = 'antigravity', apiKey = null) {
   const res = await fetch(`${API_BASE}/ai/explain-pr`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -102,6 +102,19 @@ export async function explainPR(repoPath, baseBranch, headBranch, provider = 'cl
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Falha ao gerar explicação do PR' }));
     throw new Error(err.detail || 'Falha ao gerar explicação do PR');
+  }
+  return res.json();
+}
+
+export async function testAntigravityConnection() {
+  const res = await fetch(`${API_BASE}/ai/test-antigravity`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Falha ao testar Antigravity CLI' }));
+    throw new Error(err.detail || 'Falha ao testar Antigravity CLI');
   }
   return res.json();
 }
