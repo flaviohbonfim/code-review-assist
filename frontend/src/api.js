@@ -106,6 +106,19 @@ export async function explainPR(repoPath, baseBranch, headBranch, provider = 'cl
   return res.json();
 }
 
+export async function testGeminiConnection(apiKey = null) {
+  const res = await fetch(`${API_BASE}/ai/test-gemini`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ api_key: apiKey })
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Falha ao testar conexão com o Gemini' }));
+    throw new Error(err.detail || 'Falha ao testar conexão com o Gemini');
+  }
+  return res.json();
+}
+
 export async function generateClaudePrompt(repoName, baseBranch, headBranch, reviewNotes) {
   const res = await fetch(`${API_BASE}/ai/generate-claude-prompt`, {
     method: 'POST',

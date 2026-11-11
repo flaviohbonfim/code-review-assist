@@ -51,6 +51,9 @@ class ExplainPRRequest(BaseModel):
     provider: str = "claude"
     api_key: Optional[str] = None
 
+class TestGeminiRequest(BaseModel):
+    api_key: Optional[str] = None
+
 class GenerateClaudePromptRequest(BaseModel):
     repo_name: str
     base_branch: str
@@ -215,8 +218,17 @@ async def explain_pr(req: ExplainPRRequest):
             if not cat["is_mechanical_noise"]:
                 logic_files.append(cat)
 
-        logic_files.sort(key=lambda x: x.get("added", 0) + x.get("deleted", 0), reverse=True)
-        top_files = logic_files[:25]
+        # Prioriza arquivos essenciais de arquitetura (Services, Routers, Models e novos arquivos)
+        def file_priority(f):
+            layer = f.get("layer", "")
+            is_core = layer in ["Domínio / Services", "API / Controllers / Routers", "Models & Schemas"]
+            is_added = f.get("status") == "added"
+            score = (2 if is_core else 0) + (1 if is_added else 0)
+            changes = f.get("added", 0) + f.get("deleted", 0)
+            return (-score, -changes)
+
+        logic_files.sort(key=file_priority)
+        top_files = logic_files[:10]
 
         files_summary = []
         for f in top_files:
@@ -228,15 +240,15 @@ async def explain_pr(req: ExplainPRRequest):
                 "layer": f["layer"],
                 "added_lines": f["added"],
                 "deleted_lines": f["deleted"],
-                "scopes": []
+                "symbols": []
             }
             if p.endswith(".py") and f["status"] != "deleted":
                 content = git.get_file_content_at_ref(req.head_branch, p)
                 if content:
                     scopes = ASTService.parse_python_scopes(content)
-                    info["scopes"] = [
-                        {"type": s["type"], "name": s["name"], "params": s["params"], "docstring": s["docstring"][:150] if s["docstring"] else ""}
-                        for s in scopes[:10]
+                    info["symbols"] = [
+                        f"{s['type']} {s['name']}({', '.join(s['params'][:4])})"
+                        for s in scopes[:6]
                     ]
             files_summary.append(info)
 
@@ -261,6 +273,11 @@ def generate_claude_prompt(req: GenerateClaudePromptRequest):
         req.review_notes
     )
     return {"prompt": prompt}
+
+@app.post("/api/ai/test-gemini")
+def test_gemini(req: TestGeminiRequest):
+    """Testa a conectividade da chave Gemini, medindo latência e listando modelos autorizados."""
+    return AIService.test_gemini_connection(req.api_key)
 
 dist_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
 if os.path.isdir(dist_dir):

@@ -4,6 +4,7 @@ import json
 import re
 import urllib.request
 import urllib.error
+import time
 from typing import List, Dict, Any, Optional
 
 LENS_PROMPTS = {
@@ -145,6 +146,8 @@ class AIService:
         env = os.environ.copy()
         env["PATH"] = f"/opt/homebrew/bin:/usr/local/bin:/usr/bin:{env.get('PATH', '')}"
 
+        print(f"\n[Claude CLI] Executando lente {lens} em {file_path}...", flush=True)
+        start_t = time.time()
         try:
             process = subprocess.run(
                 [claude_bin, "-p", full_prompt],
@@ -155,16 +158,22 @@ class AIService:
                 encoding="utf-8",
                 errors="replace"
             )
+            elapsed = time.time() - start_t
             if process.returncode != 0:
+                err_msg = process.stderr.strip() or process.stdout.strip()
+                print(f"[Claude CLI Erro em {elapsed:.2f}s]: {err_msg}", flush=True)
                 return {
-                    "error": f"Erro ao executar Claude CLI: {process.stderr.strip() or process.stdout.strip()}",
+                    "error": f"Erro ao executar Claude CLI: {err_msg}",
                     "issues": [],
                     "summary": "Falha na chamada do Claude CLI."
                 }
+            print(f"[Claude CLI Sucesso em {elapsed:.2f}s]", flush=True)
             return cls._clean_json_response(process.stdout)
         except subprocess.TimeoutExpired:
+            print(f"[Claude CLI Timeout após 90s]", flush=True)
             return {"error": "Timeout ao executar Claude CLI (mais de 90s).", "issues": [], "summary": "Timeout"}
         except Exception as e:
+            print(f"[Claude CLI Exceção]: {str(e)}", flush=True)
             return {"error": f"Exceção ao chamar Claude CLI: {str(e)}", "issues": [], "summary": "Erro de execução"}
 
     @classmethod
@@ -172,6 +181,7 @@ class AIService:
         """Executa a revisão via Gemini API."""
         key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         if not key:
+            print("[Gemini Erro]: Chave da API ausente.", flush=True)
             return {
                 "error": "Chave da API do Gemini não configurada (defina GEMINI_API_KEY ou informe nas configurações).",
                 "issues": [],
@@ -186,12 +196,15 @@ class AIService:
             f"Retorne APENAS o JSON especificado sem rodeios."
         )
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={key}"
+        model_name = "gemini-3.8-flash"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2}
+            "generationConfig": {"responseMimeType": "application/json"}
         }
 
+        print(f"\n[Gemini Lente '{lens}'] Chamando modelo '{model_name}' para {file_path} ({len(code)} caracteres)...", flush=True)
+        start_t = time.time()
         try:
             req = urllib.request.Request(
                 url,
@@ -199,24 +212,78 @@ class AIService:
                 headers={"Content-Type": "application/json"},
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                elapsed = time.time() - start_t
                 raw_body = resp.read().decode("utf-8", errors="replace")
+                print(f"[Gemini Sucesso] Resposta recebida em {elapsed:.2f}s ({len(raw_body)} bytes)", flush=True)
                 data = json.loads(raw_body)
                 text = data["candidates"][0]["content"]["parts"][0]["text"]
                 return cls._clean_json_response(text)
         except urllib.error.HTTPError as e:
+            elapsed = time.time() - start_t
             err_body = e.read().decode("utf-8", errors="replace")
+            print(f"[Gemini HTTPError {e.code} em {elapsed:.2f}s]: {err_body}", flush=True)
             return {
-                "error": f"Erro na API Gemini ({e.code}): {err_body}",
+                "error": f"Erro na API Gemini ({e.code} em {elapsed:.1f}s): {err_body}",
                 "issues": [],
-                "summary": "Erro na API Gemini."
+                "summary": f"Erro {e.code} na API Gemini."
+            }
+        except urllib.error.URLError as e:
+            elapsed = time.time() - start_t
+            print(f"[Gemini URLError em {elapsed:.2f}s]: {e.reason}", flush=True)
+            return {
+                "error": f"Timeout/Rede Gemini ({elapsed:.1f}s): {e.reason}",
+                "issues": [],
+                "summary": f"Timeout na conexão com o Gemini ({elapsed:.1f}s)."
             }
         except Exception as e:
+            elapsed = time.time() - start_t
+            print(f"[Gemini Exceção em {elapsed:.2f}s]: {str(e)}", flush=True)
             return {
-                "error": f"Falha de conexão com Gemini: {str(e)}",
+                "error": f"Falha ao chamar Gemini ({elapsed:.1f}s): {str(e)}",
                 "issues": [],
-                "summary": "Falha de rede ao conectar no Gemini."
+                "summary": "Falha na chamada do Gemini."
             }
+
+    @classmethod
+    def test_gemini_connection(cls, api_key: Optional[str] = None) -> Dict[str, Any]:
+        """Testa a chave e lista os modelos disponíveis na API do Google AI Studio."""
+        key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        if not key:
+            return {"ok": False, "error": "Chave da API não fornecida."}
+
+        models_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
+        print(f"\n[Gemini Teste] Consultando modelos em v1beta/models...", flush=True)
+        start_t = time.time()
+        try:
+            req = urllib.request.Request(models_url)
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                elapsed = time.time() - start_t
+                raw = resp.read().decode("utf-8", errors="replace")
+                data = json.loads(raw)
+                models = [m.get("name", "").replace("models/", "") for m in data.get("models", [])]
+                flash_models = [m for m in models if "flash" in m]
+                print(f"[Gemini Teste Sucesso] {len(models)} modelos em {elapsed:.2f}s. Modelos Flash disponíveis: {flash_models}", flush=True)
+                return {
+                    "ok": True,
+                    "elapsed_seconds": round(elapsed, 2),
+                    "total_models": len(models),
+                    "flash_models": flash_models,
+                    "active_model": "gemini-3.8-flash"
+                }
+        except urllib.error.HTTPError as e:
+            elapsed = time.time() - start_t
+            err_body = e.read().decode("utf-8", errors="replace")
+            print(f"[Gemini Teste HTTPError {e.code}]: {err_body}", flush=True)
+            return {"ok": False, "error": f"HTTP {e.code}: {err_body}", "elapsed": round(elapsed, 2)}
+        except urllib.error.URLError as e:
+            elapsed = time.time() - start_t
+            print(f"[Gemini Teste URLError]: {e.reason}", flush=True)
+            return {"ok": False, "error": f"Erro de conexão/timeout ({elapsed:.1f}s): {e.reason}", "elapsed": round(elapsed, 2)}
+        except Exception as e:
+            elapsed = time.time() - start_t
+            print(f"[Gemini Teste Exceção]: {str(e)}", flush=True)
+            return {"ok": False, "error": str(e), "elapsed": round(elapsed, 2)}
 
     @classmethod
     def run_static_analysis(cls, code: str) -> Dict[str, Any]:
@@ -363,7 +430,7 @@ INFORMAÇÕES DA TASK:
 - Branches: {base_branch} -> {head_branch}
 - Commits na task: {json.dumps(commits, ensure_ascii=False)}
 
-ARQUIVOS DE LÓGICA E MODIFICAÇÕES DE CÓDIGO:
+ARQUIVOS DE LÓGICA E MODIFICAÇÕES DE CÓDIGO (TOP ARQUIVOS PRINCIPAIS):
 {json.dumps(files_summary, ensure_ascii=False, indent=2)}
 
 Sua resposta DEVE ser estritamente em formato JSON válido contendo:
@@ -380,14 +447,14 @@ Sua resposta DEVE ser estritamente em formato JSON válido contendo:
       "filename": "arquivo.py",
       "status": "added",
       "badge_label": "Novo Arquivo",
-      "purpose": "O que este arquivo faz e qual sua responsabilidade no sistema.",
-      "code_changes": "O que especificamente foi adicionado ou modificado via código (cite nomes reais de classes, métodos, decorators, parâmetros e regras novas). Exemplo: 'Adicionou o método process_payment que valida o saldo e despacha evento para a fila.'",
-      "impact": "Como esta alteração impacta o restante do app."
+      "purpose": "O que este arquivo faz e qual sua responsabilidade no sistema (1 frase).",
+      "code_changes": "O que especificamente foi adicionado ou modificado via código (cite nomes reais de classes, métodos, decorators, parâmetros e regras novas em 2-3 frases objetivas).",
+      "impact": "Como esta alteração impacta o restante do app (1 frase)."
     }}
   ]
 }}
 
-IMPORTANTE: Seja específico e focado em código real, sem inventar arquivos que não estão na lista.
+IMPORTANTE: Seja direto, técnico e conciso (máximo 2 a 3 frases por arquivo, destacando apenas as funções e classes reais). Evite prolixidade para garantir resposta rápida.
 """
         if provider == "claude":
             claude_bin = "/opt/homebrew/bin/claude"
@@ -395,24 +462,31 @@ IMPORTANTE: Seja específico e focado em código real, sem inventar arquivos que
                 claude_bin = "claude"
             env = os.environ.copy()
             env["PATH"] = f"/opt/homebrew/bin:/usr/local/bin:/usr/bin:{env.get('PATH', '')}"
+            print(f"\n[Claude CLI Explain PR] Chamando Claude CLI...", flush=True)
+            start_t = time.time()
             try:
                 process = subprocess.run(
                     [claude_bin, "-p", prompt],
                     capture_output=True,
                     text=True,
                     env=env,
-                    timeout=120,
+                    timeout=180,
                     encoding="utf-8",
                     errors="replace"
                 )
+                elapsed = time.time() - start_t
                 if process.returncode != 0:
+                    err_msg = process.stderr.strip() or process.stdout.strip()
+                    print(f"[Claude CLI Explain PR Erro em {elapsed:.2f}s]: {err_msg}", flush=True)
                     return {
-                        "error": f"Erro no Claude CLI: {process.stderr.strip() or process.stdout.strip()}",
+                        "error": f"Erro no Claude CLI: {err_msg}",
                         "executive_summary": "Falha na geração do walkthrough via Claude CLI.",
                         "files_explained": []
                     }
+                print(f"[Claude CLI Explain PR Sucesso em {elapsed:.2f}s]", flush=True)
                 return cls._clean_json_response(process.stdout)
             except Exception as e:
+                print(f"[Claude CLI Explain PR Exceção]: {str(e)}", flush=True)
                 return {
                     "error": f"Erro ao chamar Claude CLI: {str(e)}",
                     "executive_summary": "Erro na execução do Claude CLI.",
@@ -421,16 +495,20 @@ IMPORTANTE: Seja específico e focado em código real, sem inventar arquivos que
         elif provider == "gemini":
             key = api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
             if not key:
+                print("[Gemini Explain PR]: Chave ausente.", flush=True)
                 return {
                     "error": "Chave da API do Gemini não configurada.",
                     "executive_summary": "Chave Gemini ausente.",
                     "files_explained": []
                 }
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={key}"
+            model_name = "gemini-3.8-flash"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"responseMimeType": "application/json", "temperature": 0.2}
+                "generationConfig": {"responseMimeType": "application/json"}
             }
+            print(f"\n[Gemini Explain PR] Chamando {model_name} (payload: {len(json.dumps(payload))} bytes)...", flush=True)
+            start_t = time.time()
             try:
                 req = urllib.request.Request(
                     url,
@@ -438,14 +516,35 @@ IMPORTANTE: Seja específico e focado em código real, sem inventar arquivos que
                     headers={"Content-Type": "application/json"},
                     method="POST"
                 )
-                with urllib.request.urlopen(req, timeout=90) as resp:
+                with urllib.request.urlopen(req, timeout=180) as resp:
+                    elapsed = time.time() - start_t
                     raw_body = resp.read().decode("utf-8", errors="replace")
+                    print(f"[Gemini Explain PR Sucesso] Recebido em {elapsed:.2f}s ({len(raw_body)} bytes)", flush=True)
                     data = json.loads(raw_body)
                     text = data["candidates"][0]["content"]["parts"][0]["text"]
                     return cls._clean_json_response(text)
-            except Exception as e:
+            except urllib.error.HTTPError as e:
+                elapsed = time.time() - start_t
+                err_body = e.read().decode("utf-8", errors="replace")
+                print(f"[Gemini Explain PR HTTPError {e.code} em {elapsed:.2f}s]: {err_body}", flush=True)
                 return {
-                    "error": f"Erro na API Gemini: {str(e)}",
+                    "error": f"Erro na API Gemini ({e.code} em {elapsed:.1f}s): {err_body}",
+                    "executive_summary": "Erro na API Gemini.",
+                    "files_explained": []
+                }
+            except urllib.error.URLError as e:
+                elapsed = time.time() - start_t
+                print(f"[Gemini Explain PR URLError em {elapsed:.2f}s]: {e.reason}", flush=True)
+                return {
+                    "error": f"Timeout/Rede Gemini ({elapsed:.1f}s): {e.reason}",
+                    "executive_summary": "Erro de conexão com o Gemini.",
+                    "files_explained": []
+                }
+            except Exception as e:
+                elapsed = time.time() - start_t
+                print(f"[Gemini Explain PR Exceção em {elapsed:.2f}s]: {str(e)}", flush=True)
+                return {
+                    "error": f"Erro na API Gemini ({elapsed:.1f}s): {str(e)}",
                     "executive_summary": "Erro de conexão com o Gemini.",
                     "files_explained": []
                 }
